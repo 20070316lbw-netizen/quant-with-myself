@@ -64,9 +64,7 @@ import numpy as np
 # 注：get_db 的 import 放在 __main__ 里，不在这里。
 # 这样 make_features() 本身不依赖 utils，被别的模块 import 时不会报错。
 
-
-def make_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
+"""
     输入: 含有 date, ticker, open, high, low, close, volume 的 DataFrame
     输出: 在原 DataFrame 基础上, 新增 mom_1d, mom_5d, std_5d 三列
 
@@ -80,24 +78,41 @@ def make_features(df: pd.DataFrame) -> pd.DataFrame:
 
     ⚠️ 关键点: 特征要按 ticker 分组计算!
     不能把 NVDA 的昨天和 INTC 的今天混在一起算。
-    """
-    # 先按 ticker 和 date 排序, 确保 shift/rolling 的顺序正确
-    df = df.sort_values(['ticker', 'date']).copy()
+"""
 
-    # 动量: 过去 N 天的 close 变化率
-    # pct_change(N) = (close_t / close_{t-N}) - 1
-    df['mom_1d'] = df.groupby('ticker')['close'].pct_change(1)
-    df['mom_5d'] = df.groupby('ticker')['close'].pct_change(5)
 
-    # 波动率: 过去 5 天 mom_1d 的标准差
-    # rolling 后会多出一层 group key 索引, reset_index 用来拉平, 才能赋值回 df
-    df['std_5d'] = (
+
+
+# ---- 每个特征 = 一个独立纯函数,只做一件事 ----
+# 约定:输入排好序的 df,返回一个 Series(和 df 行对齐)
+
+def _mom_1d(df: pd.DataFrame) -> pd.Series:
+    return df.groupby('ticker')['close'].pct_change(1)
+
+def _mom_5d(df: pd.DataFrame) -> pd.Series:
+    return df.groupby('ticker')['close'].pct_change(5)
+
+def _std_5d(df: pd.DataFrame) -> pd.Series:
+    # 注意:它依赖 mom_1d 这一列已经存在 —— 这个依赖现在是【显式】的
+    return (
         df.groupby('ticker')['mom_1d']
-        .rolling(5)
-        .std()
+        .rolling(5).std()
         .reset_index(level=0, drop=True)
     )
 
+# ---- 登记表:这就是"做选择"的地方,谁先算谁后算一目了然 ----
+# 顺序有意义:std_5d 在 mom_1d 之后,因为它依赖 mom_1d
+FEATURE_REGISTRY = {
+    "mom_1d": _mom_1d,
+    "mom_5d": _mom_5d,
+    "std_5d": _std_5d,
+}
+
+def make_features(df: pd.DataFrame) -> pd.DataFrame:
+    """按登记表依次计算所有特征,挂回 df"""
+    df = df.sort_values(['ticker', 'date']).copy()
+    for name, fn in FEATURE_REGISTRY.items():
+        df[name] = fn(df)
     return df
 
 
