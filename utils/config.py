@@ -24,5 +24,5 @@ def get_db():
 
 # 快捷函数：加载 yaml 配置
 def load_config(path: Path = DEFAULT_YAML) -> dict:
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:   # ← 加 encoding="utf-8"
         return yaml.safe_load(f)
