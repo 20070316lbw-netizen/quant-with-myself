@@ -13,7 +13,7 @@ sp500 = get_sp500_tickers()
 tickers = sp500['symbol'].tolist()
 
 end_date = datetime.today().strftime('%Y-%m-%d')
-start_date = (datetime.today() - timedelta(days=365)).strftime('%Y-%m-%d')
+start_date = (datetime.today() - timedelta(days=3650)).strftime('%Y-%m-%d')
 
 print(f"=== 拉取范围: {start_date} 到 {end_date} ===")
 print(f"共 {len(tickers)} 只股票\n")
