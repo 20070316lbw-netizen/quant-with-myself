@@ -5,6 +5,7 @@ from utils.config import get_db, DEFAULT_DB
 
 def create_prices_table(con: duckdb.DuckDBPyConnection) -> None:
     """建 prices 表（如已存在则先删除）"""
+    # TODO
     con.execute("DROP TABLE IF EXISTS prices")
     con.execute("""
         CREATE TABLE prices (
