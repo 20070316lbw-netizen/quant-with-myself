@@ -1,7 +1,7 @@
 # model/evaluate.py
 import pandas as pd
 
-FEATURE_COLS = ["mom_1d", "mom_5d", "std_5d"]
+FEATURE_COLS = ["mom_1d", "mom_5d", "std_5d", "KMID", "KLEN"]
 LABEL_COL = "label_5d"
 
 def evaluate_rank_ic(model, test_df: pd.DataFrame) -> dict:

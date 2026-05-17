@@ -12,11 +12,11 @@ def main():
           f"日期 {df['date'].min()} ~ {df['date'].max()}")
 
     df = make_features(df)
-    df["label_5d"] = make_label(df, n_periods=5, gap=1).values
+    df["label_5d"] = make_label(df, n_periods=5, gap=1)
+    from model.train import FEATURE_COLS
     print(f"[2] 加特征+标签后: {len(df)} 行")
-    print(f"    特征NaN: mom_1d={df['mom_1d'].isna().sum()}, "
-          f"std_5d={df['std_5d'].isna().sum()}, "
-          f"label={df['label_5d'].isna().sum()}")
+    nan_info = ", ".join([f"{col}={df[col].isna().sum()}" for col in FEATURE_COLS])
+    print(f"    特征NaN: {nan_info}, label={df['label_5d'].isna().sum()}")
 
     train_df, test_df = build_dataset(df, cfg)
     print(f"[3] 切分后: train={len(train_df)} 行, test={len(test_df)} 行")
@@ -29,8 +29,9 @@ def main():
     print(f"[4] 训练完成, 模型有 {model.num_trees()} 棵树")
 
     # 临时:在测试集上预测,看一眼数值合理不(还不是正式 evaluate)
-    valid = test_df.dropna(subset=["mom_1d","mom_5d","std_5d","label_5d"])
-    pred = model.predict(valid[["mom_1d","mom_5d","std_5d"]])
+    from model.train import FEATURE_COLS
+    valid = test_df.dropna(subset=FEATURE_COLS + ["label_5d"])
+    pred = model.predict(valid[FEATURE_COLS])
     from model.evaluate import evaluate_rank_ic
     metrics = evaluate_rank_ic(model, test_df)
     print(f"[5] Rank IC 评估:")

@@ -100,12 +100,21 @@ def _std_5d(df: pd.DataFrame) -> pd.Series:
         .reset_index(level=0, drop=True)
     )
 
+def _kmid(df: pd.DataFrame) -> pd.Series:
+    return (df['close'] - df['open']) / df['open']
+
+def _klen(df: pd.DataFrame) -> pd.Series:
+    return (df['high'] - df['low']) / df['open']
+
+
 # ---- 登记表:这就是"做选择"的地方,谁先算谁后算一目了然 ----
 # 顺序有意义:std_5d 在 mom_1d 之后,因为它依赖 mom_1d
 FEATURE_REGISTRY = {
     "mom_1d": _mom_1d,
     "mom_5d": _mom_5d,
     "std_5d": _std_5d,
+    "KMID": _kmid,
+    "KLEN": _klen,
 }
 
 def make_features(df: pd.DataFrame) -> pd.DataFrame:
