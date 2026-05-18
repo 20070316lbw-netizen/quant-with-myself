@@ -83,6 +83,7 @@ def _std_5d(df: pd.DataFrame) -> pd.Series:
 # KUP   = (high - max(open, close)) / open          # 上影线
 # KLOW  = (min(open, close) - low) / open           # 下影线
 # KSFT  = (2*close - high - low) / open             # 收盘在当日区间的相对位置
+# KMID2 = (close - open) / (high - low + 1e-12)
 def _kmid(df: pd.DataFrame) -> pd.Series:
     return (df['close'] - df['open']) / df['open']
 
@@ -97,6 +98,9 @@ def _klow(df: pd.DataFrame) -> pd.Series:
 
 def _ksft(df: pd.DataFrame) -> pd.Series:
     return (2 * df["close"] - df["high"] - df["low"]) / df["open"]
+
+def _kmid_2(df: pd.DataFrame) -> pd.Series:
+    return (df["close"] - df["open"]) / (df["high"] - df["low"] + 1e-12)
 
 
 # ROC5  = close.shift(5)  / close
@@ -125,6 +129,20 @@ def _ma_60(df: pd.DataFrame) -> pd.Series:
     return df["close"].rolling(60).mean() / df["close"]
 
 
+
+# STD5  = close.rolling(5).std()  / close
+# STD20 = close.rolling(20).std() / close
+# STD60 = close.rolling(60).std() / close
+def _std_5(df: pd.DataFrame) -> pd.Series:
+    return df["close"].rolling(5).std() / df["close"]
+
+def _std_20(df: pd.DataFrame) -> pd.Series:
+    return df["close"].rolling(20).std() / df["close"]
+
+def _std_60(df: pd.DataFrame) -> pd.Series:
+    return df["close"].rolling(60).std() / df["close"]
+
+
 # ---- 登记表:这就是"做选择"的地方,谁先算谁后算一目了然 ----
 # 顺序有意义:std_5d 在 mom_1d 之后,因为它依赖 mom_1d
 FEATURE_REGISTRY = {
@@ -132,6 +150,7 @@ FEATURE_REGISTRY = {
     "mom_5d": _mom_5d,
     "std_5d": _std_5d,
     "KMID": _kmid,
+    "KMID2": _kmid_2,
     "KLEN": _klen,
     "KUP": _kup,
     "KLOW": _klow,
@@ -142,6 +161,9 @@ FEATURE_REGISTRY = {
     "MA5": _ma_5,
     "MA20": _ma_20,
     "MA60": _ma_60,
+    "STD5": _std_5,
+    "STD20": _std_20,
+    "STD60": _std_60,
 }
 
 # ===== single source of truth =====

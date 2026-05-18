@@ -14,8 +14,12 @@ model:
   objective: regression
   num_leaves: 31
   learning_rate: 0.05
-  n_estimators: 100
   feature_fraction: 0.9
   bagging_fraction: 0.8
   bagging_freq: 5
   verbose: -1
+# ---- 训练过程控制(不是 LightGBM 模型超参,单独一段,避免混入 cfg['model']) ----
+train_control:
+  num_boost_round: 1000      # 上限:最多长 1000 棵;实际几棵由早停决定
+  early_stopping: 50         # 验证集连续 50 轮不提升就停
+  valid_frac: 0.2            # 从训练集末尾按时间切 20% 做验证(不随机切)

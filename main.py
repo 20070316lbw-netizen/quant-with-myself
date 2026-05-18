@@ -25,8 +25,13 @@ def main():
         print("    ❌ 训练集是空的!日期边界和数据范围对不上")
         return
 
-    model = train_lgb(train_df, cfg)
-    print(f"[4] 训练完成, 模型有 {model.num_trees()} 棵树")
+    model, history = train_lgb(train_df, cfg, return_history=True)
+    print(f"[4] 训练完成, 早停后实际树数 = {model.num_trees()} 棵(上限是配置的 num_boost_round)")
+    # 把每轮 train/valid 误差存下来,供画过拟合曲线用
+    import json
+    with open("train_history.json", "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+    print(f"    误差曲线已存到 train_history.json(train/valid 逐轮 RMSE)")
 
     from model.evaluate import evaluate_rank_ic
     metrics = evaluate_rank_ic(model, test_df)

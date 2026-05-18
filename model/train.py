@@ -2,6 +2,7 @@
 
 import lightgbm as lgb
 import pandas as pd
+import numpy as np
 
 from features.make_features import FEATURE_COLS   # single source of truth,不再手抄
 LABEL_COL = "label_5d"
@@ -49,21 +50,69 @@ def build_dataset(df: pd.DataFrame, cfg: dict) -> tuple:
 
     return train_df, test_df
 
-def train_lgb(train_df: pd.DataFrame, cfg: dict) -> lgb.Booster:
-    """只负责训练。配置从参数来,不自己读。"""
-    X = train_df[FEATURE_COLS]
-    y = train_df[LABEL_COL]
+def train_lgb(train_df: pd.DataFrame, cfg: dict, return_history: bool = False):
+    """
+    训练 + 时间切验证集 + early stopping。配置从参数来。
+
+    为什么验证集要这么切(面试深水区):
+    1) 不能随机切——金融数据有时间结构,拿未来验证过去=作弊。
+       验证集必须是训练集时间上最靠后的一段。
+    2) 训练段与验证段之间还要留 embargo。label_5d 要看未来 6
+       个交易日,若两段紧贴,训练集末尾样本的「答案」会覆盖
+       到验证期,早停信号被污染——你会以为没过拟合,其实是泄露撑着。
+    3) 这套 embargo 逻辑与 build_dataset 里 train->test 的切法一致,
+       不引入新逻辑,保持口径统一。
+    """
+    tc = cfg.get("train_control", {})
+    embargo = cfg["data"]["splits"].get("embargo", {}).get("days", 6)
+    valid_frac = tc.get("valid_frac", 0.2)
+    num_round = tc.get("num_boost_round", 1000)
+    stop_round = tc.get("early_stopping", 50)
+
+    df = train_df.copy()
+    df["date"] = pd.to_datetime(df["date"])
+
+    # 按交易日排序,从末尾切出 valid_frac 做验证,中间留 embargo
+    days = np.sort(df["date"].unique())
+    n_valid = max(1, int(len(days) * valid_frac))
+    valid_days = days[-n_valid:]                         # 末尾一段做验证
+    train_days = days[: len(days) - n_valid - embargo]   # 前段做训练,中间空 embargo
+    if len(train_days) == 0:
+        raise ValueError(
+            f"训练日为空:总{len(days)}天 - 验证{n_valid}天 - embargo{embargo}天 <= 0"
+        )
+
+    tr = df[df["date"].isin(train_days)]
+    va = df[df["date"].isin(valid_days)]
 
     # 只丢 NaN label。NaN 特征不丢:LightGBM 原生支持缺失值,会为缺失值学一个
     # 默认分裂方向。rolling 因子(std_5d/KLEN 等)每只股票开头天然是 NaN,
-    # 若连特征 NaN 行一起丢,会白白损失约 15% 的早期样本。
-    # 之前代码是 
-    # `mask = y.notna() & X.notna().all(axis=1)`
-    # std_5d、KLEN 这些是 rolling 窗口算的,每只股票最早那几十行天然是 NaN,这半段会把它们全删掉
-    # 所以删掉后半段就可以
-    mask = y.notna()
-    X, y = X[mask], y[mask]
+    # 若连特征 NaN 行一起丢,会白白损失早期样本。
+    # 之前代码是 `mask = y.notna() & X.notna().all(axis=1)`,后半段会误删。
+    def _xy(frame):
+        m = frame[LABEL_COL].notna()
+        return frame[FEATURE_COLS][m], frame[LABEL_COL][m]
 
-    dataset = lgb.Dataset(X, label=y)
-    model = lgb.train(cfg["model"], dataset)
+    Xtr, ytr = _xy(tr)
+    Xva, yva = _xy(va)
+
+    dtrain = lgb.Dataset(Xtr, label=ytr)
+    dvalid = lgb.Dataset(Xva, label=yva, reference=dtrain)
+
+    # record_evaluation 把每轮 train/valid 误差存进 history,用于画过拟合曲线
+    history = {}
+    model = lgb.train(
+        cfg["model"],
+        dtrain,
+        num_boost_round=num_round,
+        valid_sets=[dtrain, dvalid],
+        valid_names=["train", "valid"],
+        callbacks=[
+            lgb.early_stopping(stopping_rounds=stop_round),
+            lgb.log_evaluation(period=50),
+            lgb.record_evaluation(history),
+        ],
+    )
+    if return_history:
+        return model, history
     return model
