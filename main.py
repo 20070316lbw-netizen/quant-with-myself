@@ -28,10 +28,6 @@ def main():
     model = train_lgb(train_df, cfg)
     print(f"[4] 训练完成, 模型有 {model.num_trees()} 棵树")
 
-    # 临时:在测试集上预测,看一眼数值合理不(还不是正式 evaluate)
-    from model.train import FEATURE_COLS
-    valid = test_df.dropna(subset=FEATURE_COLS + ["label_5d"])
-    pred = model.predict(valid[FEATURE_COLS])
     from model.evaluate import evaluate_rank_ic
     metrics = evaluate_rank_ic(model, test_df)
     print(f"[5] Rank IC 评估:")
@@ -45,8 +41,13 @@ def main():
     print(f"[6] 分组收益(5组,按预测值从低到高):")
     for g, r in sorted(q["group_returns"].items()):
         print(f"    第{int(g)}组: 平均5日真实收益 = {r:.4%}")
-    print(f"    多空收益(最高组 - 最低组): {q['long_short']:.4%}")
-    print(f"    收益随分组单调递增: {q['monotonic']}")
+    print(f"[7] 多空组合(per-day 口径,逐日算再统计):")
+    print(f"    多空收益(逐日均值): {q['long_short']:.4%}")
+    print(f"    日波动(标准差)   : {q['long_short_std']:.4%}")
+    print(f"    胜率(>0 天占比)  : {q['win_rate']:.2%}")
+    print(f"    夏普(mean/std)   : {q['sharpe']:.4f}")
+    print(f"    有效天数         : {q['n_days']}")
+    print(f"    分组秩相关(-1~+1): {q['monotonic_corr']:.4f}")
 
 if __name__ == "__main__":
     main()

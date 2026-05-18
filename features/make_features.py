@@ -61,28 +61,6 @@ STD60 = close.rolling(60).std() / close
 import pandas as pd
 import numpy as np
 
-# 注：get_db 的 import 放在 __main__ 里，不在这里。
-# 这样 make_features() 本身不依赖 utils，被别的模块 import 时不会报错。
-
-"""
-    输入: 含有 date, ticker, open, high, low, close, volume 的 DataFrame
-    输出: 在原 DataFrame 基础上, 新增 mom_1d, mom_5d, std_5d 三列
-
-    命名说明:
-      mom_1d / mom_5d  — 过去 1 天 / 5 天的 close 变化率 (动量因子, 是特征)
-      std_5d           — 过去 5 天 mom_1d 的标准差 (波动率, 是特征)
-      不用 return_5d 这种名字, 是为了跟 labels/ 里的"未来 N 日收益 (label_5d)"划清界限。
-      二者都是 close 的 pct_change 计算, 但用途相反:
-        mom_5d   是当前已知的 (t-5 → t)        → 用作特征输入模型
-        label_5d 是未来要预测的 (t+1 → t+6) → 用作训练目标
-
-    ⚠️ 关键点: 特征要按 ticker 分组计算!
-    不能把 NVDA 的昨天和 INTC 的今天混在一起算。
-"""
-
-
-
-
 # ---- 每个特征 = 一个独立纯函数,只做一件事 ----
 # 约定:输入排好序的 df,返回一个 Series(和 df 行对齐)
 
@@ -100,11 +78,51 @@ def _std_5d(df: pd.DataFrame) -> pd.Series:
         .reset_index(level=0, drop=True)
     )
 
+# KMID  = (close - open) / open
+# KLEN  = (high - low) / open
+# KUP   = (high - max(open, close)) / open          # 上影线
+# KLOW  = (min(open, close) - low) / open           # 下影线
+# KSFT  = (2*close - high - low) / open             # 收盘在当日区间的相对位置
 def _kmid(df: pd.DataFrame) -> pd.Series:
     return (df['close'] - df['open']) / df['open']
 
 def _klen(df: pd.DataFrame) -> pd.Series:
     return (df['high'] - df['low']) / df['open']
+
+def _kup(df: pd.DataFrame) -> pd.Series:
+    return (df["high"] - np.maximum(df["open"], df["close"])) / df["open"]
+
+def _klow(df: pd.DataFrame) -> pd.Series:
+    return (np.minimum(df["open"], df["close"]) - df["low"]) / df["open"]
+
+def _ksft(df: pd.DataFrame) -> pd.Series:
+    return (2 * df["close"] - df["high"] - df["low"]) / df["open"]
+
+
+# ROC5  = close.shift(5)  / close
+# ROC20 = close.shift(20) / close
+# ROC60 = close.shift(60) / close
+def _roc_5(df: pd.DataFrame) -> pd.Series:
+    return df["close"].shift(5) / df["close"]
+
+def _roc_20(df: pd.DataFrame) -> pd.Series:
+    return df["close"].shift(20) / df["close"]
+
+def _roc_60(df: pd.DataFrame) -> pd.Series:
+    return df["close"].shift(60) / df["close"]
+
+
+# MA5  = close.rolling(5).mean()  / close
+# MA20 = close.rolling(20).mean() / close
+# MA60 = close.rolling(60).mean() / close
+def _ma_5(df: pd.DataFrame) -> pd.Series:
+    return df["close"].rolling(5).mean() / df["close"]
+
+def _ma_20(df: pd.DataFrame) -> pd.Series:
+    return df["close"].rolling(20).mean() / df["close"]
+
+def _ma_60(df: pd.DataFrame) -> pd.Series:
+    return df["close"].rolling(60).mean() / df["close"]
 
 
 # ---- 登记表:这就是"做选择"的地方,谁先算谁后算一目了然 ----
@@ -115,7 +133,23 @@ FEATURE_REGISTRY = {
     "std_5d": _std_5d,
     "KMID": _kmid,
     "KLEN": _klen,
+    "KUP": _kup,
+    "KLOW": _klow,
+    "KSFT": _ksft,
+    "ROC5": _roc_5,
+    "ROC20": _roc_20,
+    "ROC60": _roc_60,
+    "MA5": _ma_5,
+    "MA20": _ma_20,
+    "MA60": _ma_60,
 }
+
+# ===== single source of truth =====
+# 特征名一律从这里取。train.py / evaluate.py 不准再自己手抄一份。
+# 取的是 FEATURE_REGISTRY 实际注册的键——以「实际能算的」为准,
+# 而不是以文档/记忆为准。以后加因子只需在 REGISTRY 里加一项,
+# train 和 evaluate 自动同步,结构上不可能再出现错位。
+FEATURE_COLS = list(FEATURE_REGISTRY.keys())
 
 def make_features(df: pd.DataFrame) -> pd.DataFrame:
     """按登记表依次计算所有特征,挂回 df"""

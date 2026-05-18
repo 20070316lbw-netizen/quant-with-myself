@@ -3,7 +3,7 @@
 import lightgbm as lgb
 import pandas as pd
 
-FEATURE_COLS = ["mom_1d", "mom_5d", "std_5d", "KMID", "KLEN"]   # 修正拼写
+from features.make_features import FEATURE_COLS   # single source of truth,不再手抄
 LABEL_COL = "label_5d"
 
 def build_dataset(df: pd.DataFrame, cfg: dict) -> tuple:
@@ -54,9 +54,14 @@ def train_lgb(train_df: pd.DataFrame, cfg: dict) -> lgb.Booster:
     X = train_df[FEATURE_COLS]
     y = train_df[LABEL_COL]
 
-    # 关键:特征/标签算出来的 NaN 行(窗口没填满 + 未来不存在)必须先丢
-    # 否则 LightGBM 虽然能处理 NaN 特征,但 NaN 的 label 会污染训练
-    mask = y.notna() & X.notna().all(axis=1)
+    # 只丢 NaN label。NaN 特征不丢:LightGBM 原生支持缺失值,会为缺失值学一个
+    # 默认分裂方向。rolling 因子(std_5d/KLEN 等)每只股票开头天然是 NaN,
+    # 若连特征 NaN 行一起丢,会白白损失约 15% 的早期样本。
+    # 之前代码是 
+    # `mask = y.notna() & X.notna().all(axis=1)`
+    # std_5d、KLEN 这些是 rolling 窗口算的,每只股票最早那几十行天然是 NaN,这半段会把它们全删掉
+    # 所以删掉后半段就可以
+    mask = y.notna()
     X, y = X[mask], y[mask]
 
     dataset = lgb.Dataset(X, label=y)
