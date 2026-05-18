@@ -67,9 +67,6 @@ import numpy as np
 def _mom_1d(df: pd.DataFrame) -> pd.Series:
     return df.groupby('ticker')['close'].pct_change(1)
 
-def _mom_5d(df: pd.DataFrame) -> pd.Series:
-    return df.groupby('ticker')['close'].pct_change(5)
-
 def _std_5d(df: pd.DataFrame) -> pd.Series:
     # 注意:它依赖 mom_1d 这一列已经存在 —— 这个依赖现在是【显式】的
     return (
@@ -103,67 +100,111 @@ def _kmid_2(df: pd.DataFrame) -> pd.Series:
     return (df["close"] - df["open"]) / (df["high"] - df["low"] + 1e-12)
 
 
-# ROC5  = close.shift(5)  / close
-# ROC20 = close.shift(20) / close
-# ROC60 = close.shift(60) / close
+# ROC5  = close / close.shift(5)    # 今价/5天前价,涨了 >1(与 J&T1993 惯例一致)
+# ROC20 = close / close.shift(20)
+# ROC60 = close / close.shift(60)
+# 必须 groupby('ticker'):否则 shift 会越过 ticker 边界取到上一只股票的价格
 def _roc_5(df: pd.DataFrame) -> pd.Series:
-    return df["close"].shift(5) / df["close"]
+    return df["close"] / df.groupby("ticker")["close"].shift(5)
 
 def _roc_20(df: pd.DataFrame) -> pd.Series:
-    return df["close"].shift(20) / df["close"]
+    return df["close"] / df.groupby("ticker")["close"].shift(20)
 
 def _roc_60(df: pd.DataFrame) -> pd.Series:
-    return df["close"].shift(60) / df["close"]
+    return df["close"] / df.groupby("ticker")["close"].shift(60)
 
 
 # MA5  = close.rolling(5).mean()  / close
 # MA20 = close.rolling(20).mean() / close
 # MA60 = close.rolling(60).mean() / close
+# 必须 groupby('ticker'):否则 rolling 窗口会跨股票边界混入上一只股票的尾部数据
 def _ma_5(df: pd.DataFrame) -> pd.Series:
-    return df["close"].rolling(5).mean() / df["close"]
+    ma = df.groupby("ticker")["close"].rolling(5).mean().reset_index(level=0, drop=True)
+    return ma / df["close"]
 
 def _ma_20(df: pd.DataFrame) -> pd.Series:
-    return df["close"].rolling(20).mean() / df["close"]
+    ma = df.groupby("ticker")["close"].rolling(20).mean().reset_index(level=0, drop=True)
+    return ma / df["close"]
 
 def _ma_60(df: pd.DataFrame) -> pd.Series:
-    return df["close"].rolling(60).mean() / df["close"]
+    ma = df.groupby("ticker")["close"].rolling(60).mean().reset_index(level=0, drop=True)
+    return ma / df["close"]
 
 
 
 # STD5  = close.rolling(5).std()  / close
 # STD20 = close.rolling(20).std() / close
 # STD60 = close.rolling(60).std() / close
+# 必须 groupby('ticker'):同 MA,防 rolling 跨股票污染
 def _std_5(df: pd.DataFrame) -> pd.Series:
-    return df["close"].rolling(5).std() / df["close"]
+    s = df.groupby("ticker")["close"].rolling(5).std().reset_index(level=0, drop=True)
+    return s / df["close"]
 
 def _std_20(df: pd.DataFrame) -> pd.Series:
-    return df["close"].rolling(20).std() / df["close"]
+    s = df.groupby("ticker")["close"].rolling(20).std().reset_index(level=0, drop=True)
+    return s / df["close"]
 
 def _std_60(df: pd.DataFrame) -> pd.Series:
-    return df["close"].rolling(60).std() / df["close"]
+    s = df.groupby("ticker")["close"].rolling(60).std().reset_index(level=0, drop=True)
+    return s / df["close"]
 
+def _rank_mom_5d(df: pd.DataFrame) -> pd.Series:
+    # 自给自足:内部自算 5 日动量再做截面排名,不再依赖 mom_5d 列。
+    # 这样 mom_5d 可以从 registry 彻底删掉(它与本因子高度共线)。
+    mom5 = df.groupby("ticker")["close"].pct_change(5)
+    return mom5.groupby(df["date"]).rank(pct=True)
+
+# ---- 横截面因子:看个股在「当天全市场」里的相对位置 ----
+# 设计原则:均基于「已验证干净」的时序因子做截面 rank,
+# 不引入新的原始计算——控制变量,出错面最小。
+# rank 默认 na_option='keep':源因子为 NaN 的行 rank 后仍是 NaN,
+# 不会被错误地排进百分位。必须 groupby("date"):只在同一
+# 交易日内比较,绝不跨日期。
+
+def _rank_roc20(df: pd.DataFrame) -> pd.Series:
+    # 中期动量的横截面强弱(Jegadeesh-Titman 动量异象)
+    return df.groupby("date")["ROC20"].rank(pct=True)
+
+def _rank_std20(df: pd.DataFrame) -> pd.Series:
+    # 低波动异象——截面上波动率最低的那批股票
+    return df.groupby("date")["STD20"].rank(pct=True)
+
+def _rank_kmid(df: pd.DataFrame) -> pd.Series:
+    # 当日实体涨跌的相对强弱(短期反转 / 日内强度)
+    return df.groupby("date")["KMID"].rank(pct=True)
+
+def _rank_ma20(df: pd.DataFrame) -> pd.Series:
+    # 相对均线位置的截面排序(趋势 vs 回调)
+    return df.groupby("date")["MA20"].rank(pct=True)
 
 # ---- 登记表:这就是"做选择"的地方,谁先算谁后算一目了然 ----
 # 顺序有意义:std_5d 在 mom_1d 之后,因为它依赖 mom_1d
 FEATURE_REGISTRY = {
     "mom_1d": _mom_1d,
-    "mom_5d": _mom_5d,
     "std_5d": _std_5d,
     "KMID": _kmid,
-    "KMID2": _kmid_2,
+    # "KMID2": _kmid_2,
     "KLEN": _klen,
-    "KUP": _kup,
-    "KLOW": _klow,
-    "KSFT": _ksft,
+    # "KUP": _kup,
+    # "KLOW": _klow,
+    # "KSFT": _ksft,
     "ROC5": _roc_5,
     "ROC20": _roc_20,
     "ROC60": _roc_60,
-    "MA5": _ma_5,
-    "MA20": _ma_20,
-    "MA60": _ma_60,
+    # "MA5": _ma_5,
+    # "MA20": _ma_20,
+    # "MA60": _ma_60,
     "STD5": _std_5,
     "STD20": _std_20,
     "STD60": _std_60,
+    "RANK_MOM_5D": _rank_mom_5d,
+    # 横截面 rank 因子——必须注册在其依赖的源因子之后。
+    # ROC20/STD20/KMID/MA20 均在上方已注册,make_features 按
+    # 此顺序逐个计算,放末尾保证依赖列已存在。
+    "RANK_ROC20": _rank_roc20,
+    "RANK_STD20": _rank_std20,
+    "RANK_KMID": _rank_kmid,
+    # "RANK_MA20": _rank_ma20,
 }
 
 # ===== single source of truth =====
@@ -175,7 +216,10 @@ FEATURE_COLS = list(FEATURE_REGISTRY.keys())
 
 def make_features(df: pd.DataFrame) -> pd.DataFrame:
     """按登记表依次计算所有特征,挂回 df"""
-    df = df.sort_values(['ticker', 'date']).copy()
+    # reset_index(drop=True) 必须加:groupby-rolling 返回 MultiIndex,
+    # 内层靠行号对齐回 df。不重置索引的话 sort_values 留下的
+    # 乱序原索引会让 ma/df['close'] 的除法对齐出错。
+    df = df.sort_values(['ticker', 'date']).reset_index(drop=True).copy()
     for name, fn in FEATURE_REGISTRY.items():
         df[name] = fn(df)
     return df
