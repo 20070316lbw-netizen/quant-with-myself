@@ -1,6 +1,5 @@
 import pandas as pd
 
-from features.make_features import FEATURE_COLS   # single source of truth,不再手抄
 LABEL_COL = "label_5d"
 
 def evaluate_rank_ic(model, test_df: pd.DataFrame) -> dict:
@@ -8,8 +7,9 @@ def evaluate_rank_ic(model, test_df: pd.DataFrame) -> dict:
     横截面 Rank IC 评估。
     返回逐日 IC 序列的统计:均值、标准差、ICIR、>0 的占比
     """
-    df = test_df.dropna(subset=FEATURE_COLS + [LABEL_COL]).copy()
-    df["pred"] = model.predict(df[FEATURE_COLS])
+    feature_cols = model.feature_name()
+    df = test_df.dropna(subset=feature_cols + [LABEL_COL]).copy()
+    df["pred"] = model.predict(df[feature_cols])
 
     # 核心:按【每个交易日】分组,各算当天的 Rank IC
     def _daily_ic(group):
@@ -40,8 +40,9 @@ def evaluate_quantile_returns(model, test_df: pd.DataFrame, n_groups: int = 5) -
     每个交易日按预测值把股票分 n_groups 组,也就是5个桶子,
     看每组的平均真实收益,以及"最高组 - 最低组"的多空收益。
     """
-    df = test_df.dropna(subset=FEATURE_COLS + [LABEL_COL]).copy()
-    df["pred"] = model.predict(df[FEATURE_COLS])
+    feature_cols = model.feature_name()
+    df = test_df.dropna(subset=feature_cols + [LABEL_COL]).copy()
+    df["pred"] = model.predict(df[feature_cols])
 
     # 逐日打组号:用 groupby(...).transform,逐行返回、不改 df 结构,
     # date 始终是普通列——避开 pandas 3.0 下 groupby-apply 把分组键
@@ -50,8 +51,8 @@ def evaluate_quantile_returns(model, test_df: pd.DataFrame, n_groups: int = 5) -
         # s = 某一天所有股票的 pred。当天股票太少则不分组(返回 NaN)
         if len(s) < n_groups * 4:
             return pd.Series(float("nan"), index=s.index)
-        # 把当天股票按 pred 从低到高切成 n_groups 等份,组号 0..n_groups-1
-        return pd.qcut(s, n_groups, labels=False, duplicates="drop")
+        # 用 rank(method="first") 破同分，确保均分且不因同值预测导致 bin 合并丢失交易日
+        return pd.qcut(s.rank(method="first"), n_groups, labels=False)
 
     df = df.copy()
     df["grp"] = df.groupby("date")["pred"].transform(_grp_of_day)

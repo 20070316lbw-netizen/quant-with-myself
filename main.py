@@ -1,32 +1,39 @@
 from utils.config import get_db, load_config
-from features.make_features import make_features
+from features import build_feature_cols, make_features
 from labels.make_labels import make_label
 from model.train import build_dataset, train_lgb
 
+
 def main():
     cfg = load_config()
+
+    # 启动即校验：yaml 因子名都在注册表里，否则直接 raise
+    feature_cols = build_feature_cols(cfg)
 
     with get_db() as con:
         df = con.execute("SELECT * FROM prices ORDER BY ticker, date").fetchdf()
     print(f"[1] 原始数据: {len(df)} 行, {df['ticker'].nunique()} 只股票, "
           f"日期 {df['date'].min()} ~ {df['date'].max()}")
 
-    df = make_features(df)
+    # make_features 现在接受 feature_cols 参数（不再全量算）
+    df = make_features(df, feature_cols)
     df["label_5d"] = make_label(df, n_periods=5, gap=1)
-    from model.train import FEATURE_COLS
-    print(f"[2] 加特征+标签后: {len(df)} 行")
-    nan_info = ", ".join([f"{col}={df[col].isna().sum()}" for col in FEATURE_COLS])
-    print(f"    特征NaN: {nan_info}, label={df['label_5d'].isna().sum()}")
+    print(f"[2] 特征+标签后: {len(df)} 行")
+
+    # ── 数据量快照（在切分前）──────────────────────────
+    _print_data_health(df, feature_cols)
 
     train_df, test_df = build_dataset(df, cfg)
     print(f"[3] 切分后: train={len(train_df)} 行, test={len(test_df)} 行")
-    # 这一行最关键 —— 确认切出来的不是空的
+    
+    # 确认切出来的不是空的
     if len(train_df) == 0:
         print("    ❌ 训练集是空的!日期边界和数据范围对不上")
         return
 
-    model, history = train_lgb(train_df, cfg, return_history=True)
+    model, history = train_lgb(train_df, cfg, feature_cols=feature_cols, return_history=True)
     print(f"[4] 训练完成, 早停后实际树数 = {model.num_trees()} 棵(上限是配置的 num_boost_round)")
+    
     # 把每轮 train/valid 误差存下来,供画过拟合曲线用
     import json
     with open("train_history.json", "w", encoding="utf-8") as f:
@@ -53,6 +60,24 @@ def main():
     print(f"    夏普(mean/std)   : {q['sharpe']:.4f}")
     print(f"    有效天数         : {q['n_days']}")
     print(f"    分组秩相关(-1~+1): {q['monotonic_corr']:.4f}")
+
+
+def _print_data_health(df, feature_cols):
+    """
+    每次运行都打印数据健康摘要，方便发现'数据越来越少'的问题。
+    不 raise，只是可见性工具。
+    """
+    total = len(df)
+    label_nan = df["label_5d"].isna().sum()
+    print(f"\n── 数据健康检查 ──────────────────────────")
+    print(f"   总行数       : {total}")
+    print(f"   label NaN   : {label_nan} ({label_nan/total:.1%})")
+    for col in feature_cols:
+        n = df[col].isna().sum()
+        if n / total > 0.10:   # 超过 10% NaN 才报警，否则只是 rolling 头部正常缺失
+            print(f"   ⚠ {col}: {n} NaN ({n/total:.1%})，超过 10% 请检查")
+    print(f"──────────────────────────────────────────\n")
+
 
 if __name__ == "__main__":
     main()

@@ -10,6 +10,23 @@ data:
     test:
       start: '2024-05-24'    # = train.end + 6 个交易日，不是紧接着
       end: '2026-05-15'      # 后 2 年
+# ── 新增：因子选择 ──────────────────────────────
+features:
+  active:
+    - KMID
+    - KLEN
+    - ROC5
+    - ROC20
+    - ROC60
+    - STD5
+    - STD20
+    - STD60
+    # 后续逐批加，yaml 是唯一选择入口
+
+# ── 新增：标签处理链 ────────────────────────────
+label_processors:
+  # - cs_rank    # 注释掉这一行 = 跑基线；保留 = 实验
+
 model:
   objective: regression
   num_leaves: 31
@@ -18,6 +35,7 @@ model:
   bagging_fraction: 0.8
   bagging_freq: 5
   verbose: -1
+
 # ---- 训练过程控制(不是 LightGBM 模型超参,单独一段,避免混入 cfg['model']) ----
 train_control:
   num_boost_round: 1000      # 上限:最多长 1000 棵;实际几棵由早停决定
